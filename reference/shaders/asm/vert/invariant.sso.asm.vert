@@ -2,8 +2,10 @@
 
 out gl_PerVertex
 {
-    invariant vec4 gl_Position;
+    vec4 gl_Position;
 };
+
+invariant gl_Position;
 
 vec4 _main()
 {

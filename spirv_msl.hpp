@@ -42,8 +42,15 @@ enum MSLShaderVariableFormat
 	MSL_SHADER_VARIABLE_FORMAT_OTHER = 0,
 	MSL_SHADER_VARIABLE_FORMAT_UINT8 = 1,
 	MSL_SHADER_VARIABLE_FORMAT_UINT16 = 2,
-	MSL_SHADER_VARIABLE_FORMAT_ANY16 = 3,
-	MSL_SHADER_VARIABLE_FORMAT_ANY32 = 4,
+	MSL_SHADER_VARIABLE_FORMAT_UINT32 = 3,
+	MSL_SHADER_VARIABLE_FORMAT_FLOAT = 4,
+	MSL_SHADER_VARIABLE_FORMAT_INT8 = 5,
+	MSL_SHADER_VARIABLE_FORMAT_INT16 = 6,
+	MSL_SHADER_VARIABLE_FORMAT_INT32 = 7,
+	MSL_SHADER_VARIABLE_FORMAT_HALF = 8,
+
+	MSL_SHADER_VARIABLE_FORMAT_ANY16 = 9,
+	MSL_SHADER_VARIABLE_FORMAT_ANY32 = 10,
 
 	// Deprecated aliases.
 	MSL_VERTEX_FORMAT_OTHER = MSL_SHADER_VARIABLE_FORMAT_OTHER,
@@ -81,6 +88,10 @@ struct MSLShaderInterfaceVariable
 	spv::BuiltIn builtin = spv::BuiltInMax;
 	uint32_t vecsize = 0;
 	MSLShaderVariableRate rate = MSL_SHADER_VARIABLE_RATE_PER_VERTEX;
+	uint32_t offset = 0;
+	uint32_t stride = 0;
+	uint32_t binding = 0;
+	bool normalized = false;
 };
 
 // Matches the binding index of a MSL resource for a binding within a descriptor set.
@@ -287,6 +298,9 @@ static const uint32_t kArgumentBufferBinding = ~(3u);
 
 static const uint32_t kMaxArgumentBuffers = 8;
 
+// The arbitrary maximum for the nesting of array of array copies.
+static const uint32_t kArrayCopyMultidimMax = 6;
+
 // Decompiles SPIR-V to Metal Shading Language
 class CompilerMSL : public CompilerGLSL
 {
@@ -316,6 +330,8 @@ public:
 		uint32_t shader_input_buffer_index = 22;
 		uint32_t shader_index_buffer_index = 21;
 		uint32_t shader_patch_input_buffer_index = 20;
+		uint32_t draw_info_index = 20;
+		uint32_t xfb_buffer_index = 19;
 		uint32_t shader_input_wg_index = 0;
 		uint32_t device_index = 0;
 		uint32_t enable_frag_output_mask = 0xffffffff;
@@ -354,9 +370,6 @@ public:
 		// - Tier2 supports writable images on macOS and iOS, and higher resource count limits.
 		// Tier capabilities based on recommendations from Apple engineering.
 		ArgumentBuffersTier argument_buffers_tier = ArgumentBuffersTier::Tier1;
-
-		// Enables specifick argument buffer format with extra information to track SSBO-length
-		bool runtime_array_rich_descriptor = false;
 
 		// Ensures vertex and instance indices start at zero. This reflects the behavior of HLSL with SV_VertexID and SV_InstanceID.
 		bool enable_base_index_zero = false;
@@ -502,19 +515,14 @@ public:
 		// Note: Only Apple's GPU compiler takes advantage of the lack of coherency, so make sure to test on Apple GPUs if you disable this.
 		bool readwrite_texture_fences = true;
 
-		// Metal 3.1 introduced a Metal regression bug which causes infinite recursion during 
-		// Metal's analysis of an entry point input structure that is itself recursive. Enabling
-		// this option will replace the recursive input declaration with a alternate variable of
-		// type void*, and then cast to the correct type at the top of the entry point function.
-		// The bug has been reported to Apple, and will hopefully be fixed in future releases.
-		bool replace_recursive_inputs = false;
+		// Compile for use with a geometry shader. If set, vertex shaders will be compiled as [[object]]
+		// functions, and geometry shaders as [[mesh]].
+		bool for_mesh_pipeline = false;
 
-		// If set, manual fixups of gradient vectors for cube texture lookups will be performed.
-		// All released Apple Silicon GPUs to date behave incorrectly when sampling a cube texture
-		// with explicit gradients. They will ignore one of the three partial derivatives based
-		// on the selected major axis, and expect the remaining derivatives to be partially
-		// transformed.
-		bool agx_manual_cube_grad_fixup = false;
+		enum class PrimitiveTopology
+		{
+			Triangles, TriangleStrip, Lines, LineStrip, Points
+		} input_primitive_type;
 
 		bool is_ios() const
 		{
@@ -591,6 +599,12 @@ public:
 	{
 		return msl_options.multiview && !msl_options.view_index_from_device_index;
 	}
+
+	bool needs_xfb_buffer() const
+	{
+		return xfb_buffer_id != 0;
+	}
+
 
 	// Provide feedback to calling API to allow it to pass a buffer
 	// containing the dispatch base workgroup ID.
@@ -749,11 +763,17 @@ protected:
 		SPVFuncImplFindSMsb,
 		SPVFuncImplFindUMsb,
 		SPVFuncImplSSign,
-		SPVFuncImplArrayCopy,
-		SPVFuncImplArrayCopyMultidim,
+		SPVFuncImplArrayCopyMultidimBase,
+		// Unfortunately, we cannot use recursive templates in the MSL compiler properly,
+		// so stamp out variants up to some arbitrary maximum.
+		SPVFuncImplArrayCopy = SPVFuncImplArrayCopyMultidimBase + 1,
+		SPVFuncImplArrayOfArrayCopy2Dim = SPVFuncImplArrayCopyMultidimBase + 2,
+		SPVFuncImplArrayOfArrayCopy3Dim = SPVFuncImplArrayCopyMultidimBase + 3,
+		SPVFuncImplArrayOfArrayCopy4Dim = SPVFuncImplArrayCopyMultidimBase + 4,
+		SPVFuncImplArrayOfArrayCopy5Dim = SPVFuncImplArrayCopyMultidimBase + 5,
+		SPVFuncImplArrayOfArrayCopy6Dim = SPVFuncImplArrayCopyMultidimBase + 6,
 		SPVFuncImplTexelBufferCoords,
 		SPVFuncImplImage2DAtomicCoords, // Emulate texture2D atomic operations
-		SPVFuncImplGradientCube,
 		SPVFuncImplFMul,
 		SPVFuncImplFAdd,
 		SPVFuncImplFSub,
@@ -810,13 +830,8 @@ protected:
 		SPVFuncImplConvertYCbCrBT2020,
 		SPVFuncImplDynamicImageSampler,
 		SPVFuncImplRayQueryIntersectionParams,
-		SPVFuncImplVariableDescriptor,
-		SPVFuncImplVariableSizedDescriptor,
-		SPVFuncImplVariableDescriptorArray,
-		SPVFuncImplPaddedStd140,
-		SPVFuncImplReduceAdd,
-		SPVFuncImplImageFence,
-		SPVFuncImplTextureCast
+		SPVFuncImplEmitVertex,
+		SPVFuncImplWriteXfb,
 	};
 
 	// If the underlying resource has been used for comparison then duplicate loads of that resource must be too
@@ -850,13 +865,16 @@ protected:
 	std::string type_to_array_glsl(const SPIRType &type) override;
 	std::string constant_op_expression(const SPIRConstantOp &cop) override;
 
+	// Threadgroup arrays can't have a wrapper type
+	std::string variable_decl(const SPIRVariable &variable) override;
+
 	bool variable_decl_is_remapped_storage(const SPIRVariable &variable, spv::StorageClass storage) const override;
 
 	// GCC workaround of lambdas calling protected functions (for older GCC versions)
 	std::string variable_decl(const SPIRType &type, const std::string &name, uint32_t id = 0) override;
 
-	std::string image_type_glsl(const SPIRType &type, uint32_t id, bool member) override;
-	std::string sampler_type(const SPIRType &type, uint32_t id, bool member);
+	std::string image_type_glsl(const SPIRType &type, uint32_t id = 0) override;
+	std::string sampler_type(const SPIRType &type, uint32_t id);
 	std::string builtin_to_glsl(spv::BuiltIn builtin, spv::StorageClass storage) override;
 	std::string to_func_call_arg(const SPIRFunction::Parameter &arg, uint32_t id) override;
 	std::string to_name(uint32_t id, bool allow_alias = true) const override;
@@ -908,7 +926,7 @@ protected:
 	void extract_global_variables_from_function(uint32_t func_id, std::set<uint32_t> &added_arg_ids,
 	                                            std::unordered_set<uint32_t> &global_var_ids,
 	                                            std::unordered_set<uint32_t> &processed_func_ids);
-	uint32_t add_interface_block(spv::StorageClass storage, bool patch = false);
+	uint32_t add_interface_block(spv::StorageClass storage, bool patch = false, bool mesh_primitive = false);
 	uint32_t add_interface_block_pointer(uint32_t ib_var_id, spv::StorageClass storage);
 
 	struct InterfaceBlockMeta
@@ -951,8 +969,7 @@ protected:
 	                                                      uint32_t mbr_idx, InterfaceBlockMeta &meta,
 	                                                      const std::string &mbr_name_qual,
 	                                                      const std::string &var_chain_qual,
-	                                                      uint32_t &location, uint32_t &var_mbr_idx,
-	                                                      const Bitset &interpolation_qual);
+	                                                      uint32_t &location, uint32_t &var_mbr_idx);
 	void add_tess_level_input_to_interface_block(const std::string &ib_var_ref, SPIRType &ib_type, SPIRVariable &var);
 	void add_tess_level_input(const std::string &base_ref, const std::string &mbr_name, SPIRVariable &var);
 
@@ -970,8 +987,8 @@ protected:
 	void emit_specialization_constants_and_structs();
 	void emit_interface_block(uint32_t ib_var_id);
 	bool maybe_emit_array_assignment(uint32_t id_lhs, uint32_t id_rhs);
-	bool is_var_runtime_size_array(const SPIRVariable &var) const;
-	uint32_t get_resource_array_size(const SPIRType &type, uint32_t id) const;
+	uint32_t get_resource_array_size(uint32_t id) const;
+	void emit_mesh_wrapper();
 
 	void fix_up_shader_inputs_outputs();
 
@@ -981,6 +998,19 @@ protected:
 	std::string entry_point_arg_stage_in();
 	void entry_point_args_builtin(std::string &args);
 	void entry_point_args_discrete_descriptors(std::string &args);
+
+	struct Entry_Point_Resource
+	{
+		SPIRVariable *var;
+		SPIRVariable *descriptor_alias;
+		std::string name;
+		SPIRType::BaseType basetype;
+		uint32_t index;
+		uint32_t plane;
+		uint32_t secondary_index;
+	};
+
+	SmallVector<Entry_Point_Resource> get_sorted_entry_point_args(bool add_name = true);
 	std::string append_member_name(const std::string &qualifier, const SPIRType &type, uint32_t index);
 	std::string ensure_valid_name(std::string name, std::string pfx);
 	std::string to_sampler_expression(uint32_t id);
@@ -1038,7 +1068,6 @@ protected:
 	bool validate_member_packing_rules_msl(const SPIRType &type, uint32_t index) const;
 	std::string get_argument_address_space(const SPIRVariable &argument);
 	std::string get_type_address_space(const SPIRType &type, uint32_t id, bool argument = false);
-	static bool decoration_flags_signal_volatile(const Bitset &flags);
 	const char *to_restrict(uint32_t id, bool space);
 	SPIRType &get_stage_in_struct_type();
 	SPIRType &get_stage_out_struct_type();
@@ -1047,6 +1076,8 @@ protected:
 	std::string get_tess_factor_struct_name();
 	SPIRType &get_uint_type();
 	uint32_t get_uint_type_id();
+	SPIRType &get_ubyte_type();
+	uint32_t get_ubyte_type_id();
 	void emit_atomic_func_op(uint32_t result_type, uint32_t result_id, const char *op, spv::Op opcode,
 	                         uint32_t mem_order_1, uint32_t mem_order_2, bool has_mem_order_2, uint32_t op0, uint32_t op1 = 0,
 	                         bool op1_is_pointer = false, bool op1_is_literal = false, uint32_t op2 = 0);
@@ -1083,7 +1114,9 @@ protected:
 	uint32_t buffer_size_buffer_id = 0;
 	uint32_t view_mask_buffer_id = 0;
 	uint32_t dynamic_offsets_buffer_id = 0;
+	uint32_t xfb_buffer_id = 0;
 	uint32_t uint_type_id = 0;
+	uint32_t ubyte_type_id = 0;
 	uint32_t argument_buffer_padding_buffer_type_id = 0;
 	uint32_t argument_buffer_padding_image_type_id = 0;
 	uint32_t argument_buffer_padding_sampler_type_id = 0;
@@ -1098,7 +1131,7 @@ protected:
 	void analyze_sampled_image_usage();
 
 	bool access_chain_needs_stage_io_builtin_translation(uint32_t base) override;
-	bool prepare_access_chain_for_scalar_access(std::string &expr, const SPIRType &type, spv::StorageClass storage,
+	void prepare_access_chain_for_scalar_access(std::string &expr, const SPIRType &type, spv::StorageClass storage,
 	                                            bool &is_packed) override;
 	void fix_up_interpolant_access_chain(const uint32_t *ops, uint32_t length);
 	void check_physical_type_cast(std::string &expr, const SPIRType *type, uint32_t physical_type) override;
@@ -1110,6 +1143,7 @@ protected:
 	void ensure_builtin(spv::StorageClass storage, spv::BuiltIn builtin);
 
 	void mark_implicit_builtin(spv::StorageClass storage, spv::BuiltIn builtin, uint32_t id);
+	int get_primitive_vertex_count();
 
 	std::string convert_to_f32(const std::string &expr, uint32_t components);
 
@@ -1149,6 +1183,7 @@ protected:
 	VariableID tess_level_inner_var_id = 0;
 	VariableID tess_level_outer_var_id = 0;
 	VariableID stage_out_masked_builtin_type_id = 0;
+	VariableID stage_out_mesh_primitive_var_id = 0;
 
 	// Handle HLSL-style 0-based vertex/instance index.
 	enum class TriState
@@ -1178,6 +1213,7 @@ protected:
 	std::string qual_pos_var_name;
 	std::string stage_in_var_name = "in";
 	std::string stage_out_var_name = "out";
+	std::string stage_out_mesh_primitive_var_name = "out_1";
 	std::string patch_stage_in_var_name = "patchIn";
 	std::string patch_stage_out_var_name = "patchOut";
 	std::string sampler_name_suffix = "Smplr";
@@ -1199,13 +1235,11 @@ protected:
 	const MSLConstexprSampler *find_constexpr_sampler(uint32_t id) const;
 
 	std::unordered_set<uint32_t> buffers_requiring_array_length;
+	SmallVector<uint32_t> buffer_arrays_discrete;
 	SmallVector<std::pair<uint32_t, uint32_t>> buffer_aliases_argument;
 	SmallVector<uint32_t> buffer_aliases_discrete;
-	std::unordered_set<uint32_t> atomic_image_vars_emulated; // Emulate texture2D atomic operations
+	std::unordered_set<uint32_t> atomic_image_vars; // Emulate texture2D atomic operations
 	std::unordered_set<uint32_t> pull_model_inputs;
-	std::unordered_set<uint32_t> recursive_inputs;
-
-	SmallVector<SPIRVariable *> entry_point_bindings;
 
 	// Must be ordered since array is in a specific order.
 	std::map<SetBindingPair, std::pair<uint32_t, uint32_t>> buffers_requiring_dynamic_offset;
@@ -1217,9 +1251,6 @@ protected:
 	uint32_t argument_buffer_ids[kMaxArgumentBuffers];
 	uint32_t argument_buffer_discrete_mask = 0;
 	uint32_t argument_buffer_device_storage_mask = 0;
-
-	void emit_argument_buffer_aliased_descriptor(const SPIRVariable &aliased_var,
-	                                             const SPIRVariable &base_var);
 
 	void analyze_argument_buffers();
 	bool descriptor_set_is_argument_buffer(uint32_t desc_set) const;
@@ -1235,13 +1266,14 @@ protected:
 	uint32_t build_msl_interpolant_type(uint32_t type_id, bool is_noperspective);
 
 	bool suppress_missing_prototypes = false;
-	bool suppress_incompatible_pointer_types_discard_qualifiers = false;
 
 	void add_spv_func_and_recompile(SPVFuncImpl spv_func);
 
 	void activate_argument_buffer_resources();
 
 	bool type_is_msl_framebuffer_fetch(const SPIRType &type) const;
+	bool type_is_pointer(const SPIRType &type) const;
+	bool type_is_pointer_to_pointer(const SPIRType &type) const;
 	bool is_supported_argument_buffer_type(const SPIRType &type) const;
 
 	bool variable_storage_requires_stage_io(spv::StorageClass storage) const;
@@ -1273,7 +1305,7 @@ protected:
 
 		CompilerMSL &compiler;
 		std::unordered_map<uint32_t, uint32_t> result_types;
-		std::unordered_map<uint32_t, uint32_t> image_pointers_emulated; // Emulate texture2D atomic operations
+		std::unordered_map<uint32_t, uint32_t> image_pointers; // Emulate texture2D atomic operations
 		bool suppress_missing_prototypes = false;
 		bool uses_atomics = false;
 		bool uses_image_write = false;

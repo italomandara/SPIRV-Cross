@@ -40,7 +40,7 @@ extern "C" {
 /* Bumped if ABI or API breaks backwards compatibility. */
 #define SPVC_C_API_VERSION_MAJOR 0
 /* Bumped if APIs or enumerations are added in a backwards compatible way. */
-#define SPVC_C_API_VERSION_MINOR 59
+#define SPVC_C_API_VERSION_MINOR 57
 /* Bumped if internal implementation details change. */
 #define SPVC_C_API_VERSION_PATCH 0
 
@@ -296,10 +296,17 @@ typedef enum spvc_msl_shader_variable_format
 	SPVC_MSL_SHADER_VARIABLE_FORMAT_OTHER = 0,
 	SPVC_MSL_SHADER_VARIABLE_FORMAT_UINT8 = 1,
 	SPVC_MSL_SHADER_VARIABLE_FORMAT_UINT16 = 2,
-	SPVC_MSL_SHADER_VARIABLE_FORMAT_ANY16 = 3,
-	SPVC_MSL_SHADER_VARIABLE_FORMAT_ANY32 = 4,
+	SPVC_MSL_SHADER_VARIABLE_FORMAT_UINT32 = 3,
+	SPVC_MSL_SHADER_VARIABLE_FORMAT_FLOAT = 4,
+	SPVC_MSL_SHADER_VARIABLE_FORMAT_INT8 = 5,
+	SPVC_MSL_SHADER_VARIABLE_FORMAT_INT16 = 6,
+	SPVC_MSL_SHADER_VARIABLE_FORMAT_INT32 = 7,
+	SPVC_MSL_SHADER_VARIABLE_FORMAT_HALF = 8,
 
-	/* Deprecated names. */
+	// Deprecated aliases.
+	SPVC_MSL_SHADER_VARIABLE_FORMAT_ANY16 = SPVC_MSL_SHADER_VARIABLE_FORMAT_UINT16,
+	SPVC_MSL_SHADER_VARIABLE_FORMAT_ANY32 = SPVC_MSL_SHADER_VARIABLE_FORMAT_UINT32,
+
 	SPVC_MSL_VERTEX_FORMAT_OTHER = SPVC_MSL_SHADER_VARIABLE_FORMAT_OTHER,
 	SPVC_MSL_VERTEX_FORMAT_UINT8 = SPVC_MSL_SHADER_VARIABLE_FORMAT_UINT8,
 	SPVC_MSL_VERTEX_FORMAT_UINT16 = SPVC_MSL_SHADER_VARIABLE_FORMAT_UINT16,
@@ -725,9 +732,6 @@ typedef enum spvc_compiler_option
 
 	SPVC_COMPILER_OPTION_MSL_ARGUMENT_BUFFERS_TIER = 84 | SPVC_COMPILER_OPTION_MSL_BIT,
 	SPVC_COMPILER_OPTION_MSL_SAMPLE_DREF_LOD_ARRAY_AS_GRAD = 85 | SPVC_COMPILER_OPTION_MSL_BIT,
-	SPVC_COMPILER_OPTION_MSL_READWRITE_TEXTURE_FENCES = 86 | SPVC_COMPILER_OPTION_MSL_BIT,
-	SPVC_COMPILER_OPTION_MSL_REPLACE_RECURSIVE_INPUTS = 87 | SPVC_COMPILER_OPTION_MSL_BIT,
-	SPVC_COMPILER_OPTION_MSL_AGX_MANUAL_CUBE_GRAD_FIXUP = 88 | SPVC_COMPILER_OPTION_MSL_BIT,
 
 	SPVC_COMPILER_OPTION_INT_MAX = 0x7fffffff
 } spvc_compiler_option;
@@ -1052,8 +1056,6 @@ SPVC_PUBLIC_API int spvc_constant_get_scalar_i16(spvc_constant constant, unsigne
 SPVC_PUBLIC_API unsigned spvc_constant_get_scalar_u8(spvc_constant constant, unsigned column, unsigned row);
 SPVC_PUBLIC_API int spvc_constant_get_scalar_i8(spvc_constant constant, unsigned column, unsigned row);
 SPVC_PUBLIC_API void spvc_constant_get_subconstants(spvc_constant constant, const spvc_constant_id **constituents, size_t *count);
-SPVC_PUBLIC_API unsigned long long spvc_constant_get_scalar_u64(spvc_constant constant, unsigned column, unsigned row);
-SPVC_PUBLIC_API long long spvc_constant_get_scalar_i64(spvc_constant constant, unsigned column, unsigned row);
 SPVC_PUBLIC_API spvc_type_id spvc_constant_get_type(spvc_constant constant);
 
 /*
@@ -1064,8 +1066,6 @@ SPVC_PUBLIC_API void spvc_constant_set_scalar_fp32(spvc_constant constant, unsig
 SPVC_PUBLIC_API void spvc_constant_set_scalar_fp64(spvc_constant constant, unsigned column, unsigned row, double value);
 SPVC_PUBLIC_API void spvc_constant_set_scalar_u32(spvc_constant constant, unsigned column, unsigned row, unsigned value);
 SPVC_PUBLIC_API void spvc_constant_set_scalar_i32(spvc_constant constant, unsigned column, unsigned row, int value);
-SPVC_PUBLIC_API void spvc_constant_set_scalar_u64(spvc_constant constant, unsigned column, unsigned row, unsigned long long value);
-SPVC_PUBLIC_API void spvc_constant_set_scalar_i64(spvc_constant constant, unsigned column, unsigned row, long long value);
 SPVC_PUBLIC_API void spvc_constant_set_scalar_u16(spvc_constant constant, unsigned column, unsigned row, unsigned short value);
 SPVC_PUBLIC_API void spvc_constant_set_scalar_i16(spvc_constant constant, unsigned column, unsigned row, signed short value);
 SPVC_PUBLIC_API void spvc_constant_set_scalar_u8(spvc_constant constant, unsigned column, unsigned row, unsigned char value);

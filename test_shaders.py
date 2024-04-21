@@ -29,7 +29,6 @@ import codecs
 import json
 import multiprocessing
 import errno
-import platform
 from functools import partial
 
 class Paths():
@@ -101,14 +100,8 @@ def get_shader_stats(shader):
 
 def print_msl_compiler_version():
     try:
-        if platform.system() == 'Darwin':
-            subprocess.check_call(['xcrun', '--sdk', 'iphoneos', 'metal', '--version'])
-            print('... are the Metal compiler characteristics.\n')   # display after so xcrun FNF is silent
-        else:
-            # Use Metal Windows toolkit to test on Linux (Wine) and Windows.
-            print('Running on non-macOS system.')
-            subprocess.check_call(['metal', '-x', 'metal', '--version'])
-
+        subprocess.check_call(['xcrun', '--sdk', 'iphoneos', 'metal', '--version'])
+        print('... are the Metal compiler characteristics.\n')   # display after so xcrun FNF is silent
     except OSError as e:
         if (e.errno != errno.ENOENT):    # Ignore xcrun not found error
             raise
@@ -118,13 +111,9 @@ def print_msl_compiler_version():
 
 def msl_compiler_supports_version(version):
     try:
-        if platform.system() == 'Darwin':
-            subprocess.check_call(['xcrun', '--sdk', 'macosx', 'metal', '-x', 'metal', version, '-'],
-                stdin = subprocess.DEVNULL, stdout = subprocess.DEVNULL, stderr = subprocess.DEVNULL)
-            print('Current SDK supports MSL {0}. Enabling validation for MSL {0} shaders.'.format(version))
-        else:
-            print('Running on {}, assuming {} is supported.'.format(platform.system(), version))
-        # If we're running on non-macOS system, assume it's supported.
+        subprocess.check_call(['xcrun', '--sdk', 'macosx', 'metal', '-x', 'metal', version, '-'],
+            stdin = subprocess.DEVNULL, stdout = subprocess.DEVNULL, stderr = subprocess.DEVNULL)
+        print('Current SDK supports MSL {0}. Enabling validation for MSL {0} shaders.'.format(version))
         return True
     except OSError as e:
         print('Failed to check if MSL {} is not supported. It probably is not.'.format(version))
@@ -134,12 +123,12 @@ def msl_compiler_supports_version(version):
         return False
 
 def path_to_msl_standard(shader):
-    if '.msl31.' in shader:
-        return '-std=metal3.1'
-    elif '.msl3.' in shader:
-        return '-std=metal3.0'
-    elif '.ios.' in shader:
-        if '.msl2.' in shader:
+    if '.ios.' in shader:
+        if '.msl31.' in shader:
+            return '-std=metal3.1'
+        if '.msl3.' in shader:
+            return '-std=metal3.0'
+        elif '.msl2.' in shader:
             return '-std=ios-metal2.0'
         elif '.msl21.' in shader:
             return '-std=ios-metal2.1'
@@ -156,7 +145,11 @@ def path_to_msl_standard(shader):
         else:
             return '-std=ios-metal1.2'
     else:
-        if '.msl2.' in shader:
+        if '.msl31.' in shader:
+            return '-std=metal3.1'
+        if '.msl3.' in shader:
+            return '-std=metal3.0'
+        elif '.msl2.' in shader:
             return '-std=macos-metal2.0'
         elif '.msl21.' in shader:
             return '-std=macos-metal2.1'
@@ -174,7 +167,7 @@ def path_to_msl_standard(shader):
 def path_to_msl_standard_cli(shader):
     if '.msl31.' in shader:
         return '30100'
-    elif '.msl3.' in shader:
+    if '.msl3.' in shader:
         return '30000'
     elif '.msl2.' in shader:
         return '20000'
@@ -191,30 +184,18 @@ def path_to_msl_standard_cli(shader):
     else:
         return '10200'
 
-ignore_win_metal_tool = False
 def validate_shader_msl(shader, opt):
     msl_path = reference_path(shader[0], shader[1], opt)
-    global ignore_win_metal_tool
     try:
         if '.ios.' in msl_path:
             msl_os = 'iphoneos'
         else:
             msl_os = 'macosx'
-
-        if platform.system() == 'Darwin':
-            subprocess.check_call(['xcrun', '--sdk', msl_os, 'metal', '-x', 'metal', path_to_msl_standard(msl_path), '-Werror', '-Wno-unused-variable', msl_path])
-            print('Compiled Metal shader: ' + msl_path)   # display after so xcrun FNF is silent
-        elif not ignore_win_metal_tool:
-            # Use Metal Windows toolkit to test on Linux (Wine) and Windows. Running offline tool on Linux gets weird.
-            # Normal winepath doesn't work, it must be Z:/abspath *exactly* for some bizarre reason.
-            target_path = msl_path if platform.system == 'Windows' else ('Z:' + os.path.abspath(msl_path))
-            subprocess.check_call(['metal', '-x', 'metal', path_to_msl_standard(msl_path), '-Werror', '-Wno-unused-variable', target_path])
-
+        subprocess.check_call(['xcrun', '--sdk', msl_os, 'metal', '-x', 'metal', path_to_msl_standard(msl_path), '-Werror', '-Wno-unused-variable', msl_path])
+        print('Compiled Metal shader: ' + msl_path)   # display after so xcrun FNF is silent
     except OSError as oe:
-        if (oe.errno != errno.ENOENT):   # Ignore xcrun or metal not found error
+        if (oe.errno != errno.ENOENT):   # Ignore xcrun not found error
             raise
-        print('metal toolkit does not exist, ignoring further attempts to use it.')
-        ignore_win_metal_tool = True
     except subprocess.CalledProcessError:
         print('Error compiling Metal shader: ' + msl_path)
         raise RuntimeError('Failed to compile Metal shader')
@@ -237,6 +218,8 @@ def cross_compile_msl(shader, spirv, opt, iterations, paths):
         glslang_env = 'vulkan1.1'
 
     spirv_cmd = [paths.spirv_as, '--preserve-numeric-ids', '--target-env', spirv_env, '-o', spirv_path, shader]
+    if '.preserve.' in shader:
+        spirv_cmd.append('--preserve-numeric-ids')
 
     if spirv:
         subprocess.check_call(spirv_cmd)
@@ -269,9 +252,6 @@ def cross_compile_msl(shader, spirv, opt, iterations, paths):
         msl_args.append('--msl-domain-lower-left')
     if '.argument.' in shader:
         msl_args.append('--msl-argument-buffers')
-    if '.argument-tier-1.' in shader:
-        msl_args.append('--msl-argument-buffer-tier')
-        msl_args.append('1')
     if '.texture-buffer-native.' in shader:
         msl_args.append('--msl-texture-buffer-native')
     if '.framebuffer-fetch.' in shader:
@@ -378,14 +358,8 @@ def cross_compile_msl(shader, spirv, opt, iterations, paths):
         msl_args.append('--msl-check-discarded-frag-stores')
     if '.lod-as-grad.' in shader:
         msl_args.append('--msl-sample-dref-lod-array-as-grad')
-    if '.agx-cube-grad.' in shader:
-        msl_args.append('--msl-agx-manual-cube-grad-fixup')
     if '.decoration-binding.' in shader:
         msl_args.append('--msl-decoration-binding')
-    if '.rich-descriptor.' in shader:
-        msl_args.append('--msl-runtime-array-rich-descriptor')
-    if '.replace-recursive-inputs.' in shader:
-        msl_args.append('--msl-replace-recursive-inputs')
     if '.mask-location-0.' in shader:
         msl_args.append('--mask-stage-output-location')
         msl_args.append('0')
@@ -515,6 +489,8 @@ def cross_compile_hlsl(shader, spirv, opt, force_no_external_validation, iterati
         glslang_env = 'vulkan1.1'
 
     spirv_cmd = [paths.spirv_as, '--preserve-numeric-ids', '--target-env', spirv_env, '-o', spirv_path, shader]
+    if '.preserve.' in shader:
+        spirv_cmd.append('--preserve-numeric-ids')
 
     if spirv:
         subprocess.check_call(spirv_cmd)
@@ -564,6 +540,8 @@ def cross_compile_reflect(shader, spirv, opt, iterations, paths):
     reflect_path = create_temporary(os.path.basename(shader))
 
     spirv_cmd = [paths.spirv_as, '--preserve-numeric-ids', '--target-env', 'vulkan1.1', '-o', spirv_path, shader]
+    if '.preserve.' in shader:
+        spirv_cmd.append('--preserve-numeric-ids')
 
     if spirv:
         subprocess.check_call(spirv_cmd)
@@ -607,6 +585,8 @@ def cross_compile(shader, vulkan, spirv, invalid_spirv, eliminate, is_legacy, fo
         vulkan_glsl_path = create_temporary('vk' + os.path.basename(shader))
 
     spirv_cmd = [paths.spirv_as, '--preserve-numeric-ids', '--target-env', spirv_env, '-o', spirv_path, shader]
+    if '.preserve.' in shader:
+        spirv_cmd.append('--preserve-numeric-ids')
 
     if spirv:
         subprocess.check_call(spirv_cmd)
@@ -895,22 +875,12 @@ def test_shader_msl(stats, shader, args, paths):
     # used as input to an invocation of spirv-cross to debug from Xcode directly.
     # To do so, build spriv-cross using `make DEBUG=1`, then run the spriv-cross
     # executable from Xcode using args: `--msl --entry main --output msl_path spirv_path`.
-#    print('SPRIV shader: ' + spirv)
+    print('SPRIV shader: ' + spirv)
 
-    shader_is_msl22 = '.msl22.' in joined_path
-    shader_is_msl23 = '.msl23.' in joined_path
-    shader_is_msl24 = '.msl24.' in joined_path
-    shader_is_msl30 = '.msl3.' in joined_path
-    shader_is_msl31 = '.msl31.' in joined_path
-    skip_validation = (shader_is_msl22 and (not args.msl22)) or \
-        (shader_is_msl23 and (not args.msl23)) or \
-        (shader_is_msl24 and (not args.msl24)) or \
-        (shader_is_msl30 and (not args.msl30)) or \
-        (shader_is_msl31 and (not args.msl31))
-
-    if skip_validation:
-        print('Skipping validation for {} due to lack of toolchain support.'.format(joined_path))
-
+    shader_is_msl22 = 'msl22' in joined_path
+    shader_is_msl23 = 'msl23' in joined_path
+    shader_is_msl24 = 'msl24' in joined_path
+    skip_validation = (shader_is_msl22 and (not args.msl22)) or (shader_is_msl23 and (not args.msl23)) or (shader_is_msl24 and (not args.msl24))
     if '.invalid.' in joined_path:
         skip_validation = True
 

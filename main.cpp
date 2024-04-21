@@ -676,10 +676,6 @@ struct CLIArguments
 	bool msl_manual_helper_invocation_updates = true;
 	bool msl_check_discarded_frag_stores = false;
 	bool msl_sample_dref_lod_array_as_grad = false;
-	bool msl_runtime_array_rich_descriptor = false;
-	bool msl_replace_recursive_inputs = false;
-	bool msl_readwrite_texture_fences = true;
-	bool msl_agx_manual_cube_grad_fixup = false;
 	const char *msl_combined_sampler_suffix = nullptr;
 	bool glsl_emit_push_constant_as_ubo = false;
 	bool glsl_emit_ubo_as_plain_uniforms = false;
@@ -868,9 +864,7 @@ static void print_help_msl()
 	                "\t\tRequires MSL 2.0 to be enabled.\n"
 	                "\t[--msl-argument-buffer-tier]:\n\t\tWhen using Metal argument buffers, indicate the Metal argument buffer tier level supported by the Metal platform.\n"
 	                "\t\tUses same values as Metal MTLArgumentBuffersTier enumeration (0 = Tier1, 1 = Tier2).\n"
-	                "\t\tNOTE: Setting this value no longer enables msl-argument-buffers implicitly.\n"
-	                "\t[--msl-runtime-array-rich-descriptor]:\n\t\tWhen declaring a runtime array of SSBOs, declare an array of {ptr, len} pairs to support OpArrayLength.\n"
-	                "\t[--msl-replace-recursive-inputs]:\n\t\tWorks around a Metal 3.1 regression bug, which causes an infinite recursion crash during Metal's analysis of an entry point input structure that itself contains internal recursion.\n"
+	                "\t\tSetting this value also enables msl-argument-buffers.\n"
 	                "\t[--msl-texture-buffer-native]:\n\t\tEnable native support for texel buffers. Otherwise, it is emulated as a normal texture.\n"
 	                "\t[--msl-framebuffer-fetch]:\n\t\tImplement subpass inputs with frame buffer fetch.\n"
 	                "\t\tEmits [[color(N)]] inputs in fragment stage.\n"
@@ -904,23 +898,23 @@ static void print_help_msl()
 	                "\t[--msl-enable-frag-output-mask <mask>]:\n\t\tOnly selectively enable fragment outputs. Useful if pipeline does not enable fragment output for certain locations, as pipeline creation might otherwise fail.\n"
 	                "\t[--msl-no-clip-distance-user-varying]:\n\t\tDo not emit user varyings to emulate gl_ClipDistance in fragment shaders.\n"
 	                "\t[--msl-add-shader-input <index> <format> <size> <rate>]:\n\t\tSpecify the format of the shader input at <index>.\n"
-	                "\t\t<format> can be 'any32', 'any16', 'u16', 'u8', or 'other', to indicate a 32-bit opaque value, 16-bit opaque value, 16-bit unsigned integer, 8-bit unsigned integer, "
-	                "or other-typed variable. <size> is the vector length of the variable, which must be greater than or equal to that declared in the shader. <rate> can be 'vertex', "
+	                "\t\t<format> can be 'i32', 'i16', 'i8', 'u32', 'u16', 'u8', 'float', 'half', or 'other',\n\t\tto indicate a 32/16/8-bit integer (i) or unsigned integer (u), floating point, half-precision floating point, "
+	                "or other-typed variable.\n\t\t'any16' or 'any32' can also be used to specify opaque 16-bit or 32-bit value.\n\t\t<size> is the vector length of the variable, which must be greater than or equal to that declared in the shader. <rate> can be 'vertex', "
 	                "'primitive', or 'patch' to indicate a per-vertex, per-primitive, or per-patch variable.\n"
 	                "\t\tUseful if shader stage interfaces don't match up, as pipeline creation might otherwise fail.\n"
 	                "\t[--msl-add-shader-output <index> <format> <size> <rate>]:\n\t\tSpecify the format of the shader output at <index>.\n"
-	                "\t\t<format> can be 'any32', 'any16', 'u16', 'u8', or 'other', to indicate a 32-bit opaque value, 16-bit opaque value, 16-bit unsigned integer, 8-bit unsigned integer, "
-	                "or other-typed variable. <size> is the vector length of the variable, which must be greater than or equal to that declared in the shader. <rate> can be 'vertex', "
+	                "\t\t<format> can be 'i32', 'i16', 'i8', 'u32', 'u16', 'u8', 'float', 'half', or 'other',\n\t\tto indicate a 32/16/8-bit integer (i) or unsigned integer (u), floating point, half-precision floating point, "
+	                "or other-typed variable.\n\t\t'any16' or 'any32' can also be used to specify opaque 16-bit or 32-bit value.\n\t\t<size> is the vector length of the variable, which must be greater than or equal to that declared in the shader. <rate> can be 'vertex', "
 	                "'primitive', or 'patch' to indicate a per-vertex, per-primitive, or per-patch variable.\n"
 	                "\t\tUseful if shader stage interfaces don't match up, as pipeline creation might otherwise fail.\n"
 	                "\t[--msl-shader-input <index> <format> <size>]:\n\t\tSpecify the format of the shader input at <index>.\n"
-	                "\t\t<format> can be 'any32', 'any16', 'u16', 'u8', or 'other', to indicate a 32-bit opaque value, 16-bit opaque value, 16-bit unsigned integer, 8-bit unsigned integer, "
-	                "or other-typed variable. <size> is the vector length of the variable, which must be greater than or equal to that declared in the shader."
-	                "\t\tEquivalent to --msl-add-shader-input with a rate of 'vertex'.\n"
+	                "\t\t<format> can be 'i32', 'i16', 'i8', 'u32', 'u16', 'u8', 'float', 'half', or 'other',\n\t\tto indicate a 32/16/8-bit integer (i) or unsigned integer (u), floating point, half-precision floating point, "
+	                "or other-typed variable.\n\t\t'any16' or 'any32' can also be used to specify opaque 16-bit or 32-bit value.\n\t\t<size> is the vector length of the variable, which must be greater than or equal to that declared in the shader."
+	                "\n\t\tEquivalent to --msl-add-shader-input with a rate of 'vertex'.\n"
 	                "\t[--msl-shader-output <index> <format> <size>]:\n\t\tSpecify the format of the shader output at <index>.\n"
-	                "\t\t<format> can be 'any32', 'any16', 'u16', 'u8', or 'other', to indicate a 32-bit opaque value, 16-bit opaque value, 16-bit unsigned integer, 8-bit unsigned integer, "
-	                "or other-typed variable. <size> is the vector length of the variable, which must be greater than or equal to that declared in the shader."
-	                "\t\tEquivalent to --msl-add-shader-output with a rate of 'vertex'.\n"
+	                "\t\t<format> can be 'i32', 'i16', 'i8', 'u32', 'u16', 'u8', 'float', 'half', or 'other',\n\t\tto indicate a 32/16/8-bit integer (i) or unsigned integer (u), floating point, half-precision floating point, "
+	                "or other-typed variable.\n\t\t'any16' or 'any32' can also be used to specify opaque 16-bit or 32-bit value.\n\t\t<size> is the vector length of the variable, which must be greater than or equal to that declared in the shader."
+	                "\n\t\tEquivalent to --msl-add-shader-output with a rate of 'vertex'.\n"
 	                "\t[--msl-raw-buffer-tese-input]:\n\t\tUse raw buffers for tessellation evaluation input.\n"
 	                "\t\tThis allows the use of nested structures and arrays.\n"
 	                "\t\tIn a future version of SPIRV-Cross, this will become the default.\n"
@@ -960,14 +954,6 @@ static void print_help_msl()
 	                "\t\tSome Metal devices have a bug where the level() argument to\n"
 	                "\t\tdepth2d_array<T>::sample_compare() in a fragment shader is biased by some\n"
 	                "\t\tunknown amount. This prevents the bias from being added.\n"
-	                "\t[--msl-no-readwrite-texture-fences]:\n\t\tDo not insert fences before each read of a\n"
-	                "\t\tread_write texture. MSL does not guarantee coherence between writes and later reads\n"
-	                "\t\tof read_write textures. If you don't rely on this, you can disable this for a\n"
-	                "\t\tpossible performance improvement.\n"
-	                "\t[--msl-agx-manual-cube-grad-fixup]:\n\t\tManually transform cube texture gradients.\n"
-	                "\t\tAll released Apple Silicon GPUs to date ignore one of the three partial derivatives\n"
-	                "\t\tbased on the selected major axis, and expect the remaining derivatives to be\n"
-	                "\t\tpartially transformed. This fixup gives correct results on Apple Silicon.\n"
 	                "\t[--msl-combined-sampler-suffix <suffix>]:\n\t\tUses a custom suffix for combined samplers.\n");
 	// clang-format on
 }
@@ -1244,10 +1230,6 @@ static string compile_iteration(const CLIArguments &args, std::vector<uint32_t> 
 		msl_opts.check_discarded_frag_stores = args.msl_check_discarded_frag_stores;
 		msl_opts.sample_dref_lod_array_as_grad = args.msl_sample_dref_lod_array_as_grad;
 		msl_opts.ios_support_base_vertex_instance = true;
-		msl_opts.runtime_array_rich_descriptor = args.msl_runtime_array_rich_descriptor;
-		msl_opts.replace_recursive_inputs = args.msl_replace_recursive_inputs;
-		msl_opts.readwrite_texture_fences = args.msl_readwrite_texture_fences;
-		msl_opts.agx_manual_cube_grad_fixup = args.msl_agx_manual_cube_grad_fixup;
 		msl_comp->set_msl_options(msl_opts);
 		for (auto &v : args.msl_discrete_descriptor_sets)
 			msl_comp->add_discrete_descriptor_set(v);
@@ -1569,6 +1551,34 @@ static string compile_iteration(const CLIArguments &args, std::vector<uint32_t> 
 	return ret;
 }
 
+static MSLShaderVariableFormat parse_format(const char *text)
+{
+	MSLShaderVariableFormat format;
+	if (strcmp(text, "i8") == 0)
+		format = MSL_SHADER_VARIABLE_FORMAT_INT8;
+	else if (strcmp(text, "i16") == 0)
+		format = MSL_SHADER_VARIABLE_FORMAT_INT16;
+	else if (strcmp(text, "i32") == 0)
+		format = MSL_SHADER_VARIABLE_FORMAT_INT32;
+	else if (strcmp(text, "u8") == 0)
+		format = MSL_SHADER_VARIABLE_FORMAT_UINT8;
+	else if (strcmp(text, "u16") == 0)
+		format = MSL_SHADER_VARIABLE_FORMAT_UINT16;
+	else if (strcmp(text, "u32") == 0)
+		format = MSL_SHADER_VARIABLE_FORMAT_UINT32;
+	else if (strcmp(text, "float") == 0)
+		format = MSL_SHADER_VARIABLE_FORMAT_FLOAT;
+	else if (strcmp(text, "half") == 0)
+		format = MSL_SHADER_VARIABLE_FORMAT_HALF;
+	else if (strcmp(text, "any16") == 0)
+		format = MSL_SHADER_VARIABLE_FORMAT_ANY16;
+	else if (strcmp(text, "any32") == 0)
+		format = MSL_SHADER_VARIABLE_FORMAT_ANY32;
+	else
+		format = MSL_SHADER_VARIABLE_FORMAT_OTHER;
+	return format;
+}
+
 static int main_inner(int argc, char *argv[])
 {
 	CLIArguments args;
@@ -1654,8 +1664,10 @@ static int main_inner(int argc, char *argv[])
 	cbs.add("--msl-pad-fragment-output", [&args](CLIParser &) { args.msl_pad_fragment_output = true; });
 	cbs.add("--msl-domain-lower-left", [&args](CLIParser &) { args.msl_domain_lower_left = true; });
 	cbs.add("--msl-argument-buffers", [&args](CLIParser &) { args.msl_argument_buffers = true; });
-	cbs.add("--msl-argument-buffer-tier",
-	        [&args](CLIParser &parser) { args.msl_argument_buffers_tier = parser.next_uint(); });
+	cbs.add("--msl-argument-buffer-tier", [&args](CLIParser &parser) {
+		args.msl_argument_buffers_tier = parser.next_uint();
+		args.msl_argument_buffers = true;
+	});
 	cbs.add("--msl-discrete-descriptor-set",
 	        [&args](CLIParser &parser) { args.msl_discrete_descriptor_sets.push_back(parser.next_uint()); });
 	cbs.add("--msl-device-argument-buffer",
@@ -1700,16 +1712,7 @@ static int main_inner(int argc, char *argv[])
 		// Make sure next_uint() is called in-order.
 		input.location = parser.next_uint();
 		const char *format = parser.next_value_string("other");
-		if (strcmp(format, "any32") == 0)
-			input.format = MSL_SHADER_VARIABLE_FORMAT_ANY32;
-		else if (strcmp(format, "any16") == 0)
-			input.format = MSL_SHADER_VARIABLE_FORMAT_ANY16;
-		else if (strcmp(format, "u16") == 0)
-			input.format = MSL_SHADER_VARIABLE_FORMAT_UINT16;
-		else if (strcmp(format, "u8") == 0)
-			input.format = MSL_SHADER_VARIABLE_FORMAT_UINT8;
-		else
-			input.format = MSL_SHADER_VARIABLE_FORMAT_OTHER;
+		input.format = parse_format(format);
 		input.vecsize = parser.next_uint();
 		const char *rate = parser.next_value_string("vertex");
 		if (strcmp(rate, "primitive") == 0)
@@ -1725,16 +1728,7 @@ static int main_inner(int argc, char *argv[])
 		// Make sure next_uint() is called in-order.
 		output.location = parser.next_uint();
 		const char *format = parser.next_value_string("other");
-		if (strcmp(format, "any32") == 0)
-			output.format = MSL_SHADER_VARIABLE_FORMAT_ANY32;
-		else if (strcmp(format, "any16") == 0)
-			output.format = MSL_SHADER_VARIABLE_FORMAT_ANY16;
-		else if (strcmp(format, "u16") == 0)
-			output.format = MSL_SHADER_VARIABLE_FORMAT_UINT16;
-		else if (strcmp(format, "u8") == 0)
-			output.format = MSL_SHADER_VARIABLE_FORMAT_UINT8;
-		else
-			output.format = MSL_SHADER_VARIABLE_FORMAT_OTHER;
+		output.format = parse_format(format);
 		output.vecsize = parser.next_uint();
 		const char *rate = parser.next_value_string("vertex");
 		if (strcmp(rate, "primitive") == 0)
@@ -1750,16 +1744,7 @@ static int main_inner(int argc, char *argv[])
 		// Make sure next_uint() is called in-order.
 		input.location = parser.next_uint();
 		const char *format = parser.next_value_string("other");
-		if (strcmp(format, "any32") == 0)
-			input.format = MSL_SHADER_VARIABLE_FORMAT_ANY32;
-		else if (strcmp(format, "any16") == 0)
-			input.format = MSL_SHADER_VARIABLE_FORMAT_ANY16;
-		else if (strcmp(format, "u16") == 0)
-			input.format = MSL_SHADER_VARIABLE_FORMAT_UINT16;
-		else if (strcmp(format, "u8") == 0)
-			input.format = MSL_SHADER_VARIABLE_FORMAT_UINT8;
-		else
-			input.format = MSL_SHADER_VARIABLE_FORMAT_OTHER;
+		input.format = parse_format(format);
 		input.vecsize = parser.next_uint();
 		args.msl_shader_inputs.push_back(input);
 	});
@@ -1768,16 +1753,7 @@ static int main_inner(int argc, char *argv[])
 		// Make sure next_uint() is called in-order.
 		output.location = parser.next_uint();
 		const char *format = parser.next_value_string("other");
-		if (strcmp(format, "any32") == 0)
-			output.format = MSL_SHADER_VARIABLE_FORMAT_ANY32;
-		else if (strcmp(format, "any16") == 0)
-			output.format = MSL_SHADER_VARIABLE_FORMAT_ANY16;
-		else if (strcmp(format, "u16") == 0)
-			output.format = MSL_SHADER_VARIABLE_FORMAT_UINT16;
-		else if (strcmp(format, "u8") == 0)
-			output.format = MSL_SHADER_VARIABLE_FORMAT_UINT8;
-		else
-			output.format = MSL_SHADER_VARIABLE_FORMAT_OTHER;
+		output.format = parse_format(format);
 		output.vecsize = parser.next_uint();
 		args.msl_shader_outputs.push_back(output);
 	});
@@ -1802,15 +1778,9 @@ static int main_inner(int argc, char *argv[])
 	cbs.add("--msl-check-discarded-frag-stores", [&args](CLIParser &) { args.msl_check_discarded_frag_stores = true; });
 	cbs.add("--msl-sample-dref-lod-array-as-grad",
 	        [&args](CLIParser &) { args.msl_sample_dref_lod_array_as_grad = true; });
-	cbs.add("--msl-no-readwrite-texture-fences", [&args](CLIParser &) { args.msl_readwrite_texture_fences = false; });
-	cbs.add("--msl-agx-manual-cube-grad-fixup", [&args](CLIParser &) { args.msl_agx_manual_cube_grad_fixup = true; });
 	cbs.add("--msl-combined-sampler-suffix", [&args](CLIParser &parser) {
 		args.msl_combined_sampler_suffix = parser.next_string();
 	});
-	cbs.add("--msl-runtime-array-rich-descriptor",
-	        [&args](CLIParser &) { args.msl_runtime_array_rich_descriptor = true; });
-	cbs.add("--msl-replace-recursive-inputs",
-	        [&args](CLIParser &) { args.msl_replace_recursive_inputs = true; });
 	cbs.add("--extension", [&args](CLIParser &parser) { args.extensions.push_back(parser.next_string()); });
 	cbs.add("--rename-entry-point", [&args](CLIParser &parser) {
 		auto old_name = parser.next_string();

@@ -66,11 +66,6 @@ public:
 	    : std::runtime_error(str)
 	{
 	}
-
-	explicit CompilerError(const char *str)
-	    : std::runtime_error(str)
-	{
-	}
 };
 
 #define SPIRV_CROSS_THROW(x) throw CompilerError(x)
